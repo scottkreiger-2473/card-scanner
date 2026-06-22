@@ -395,10 +395,14 @@ async function getEbayToken(){
     headers:{'Authorization':`Basic ${creds}`,'Content-Type':'application/x-www-form-urlencoded'},
     body:'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope'
   });
-  if(!res.ok)throw new Error('eBay auth failed: '+res.status);
+  if(!res.ok){
+    const errBody=await res.json().catch(()=>({}));
+    throw new Error('eBay auth failed: '+res.status+' — '+JSON.stringify(errBody));
+  }
   const data=await res.json();
   ebayToken=data.access_token;
   ebayTokenExpiry=Date.now()+(data.expires_in-60)*1000;
+  console.log('eBay token obtained successfully');
   return ebayToken;
 }
 
@@ -439,7 +443,9 @@ async function ebaySearch(query, token){
     }
   });
   if(!res.ok){
-    console.warn('eBay search failed:',res.status, await res.text());
+    const errText=await res.text();
+    console.warn('eBay search failed:',res.status, errText);
+    setStatus('eBay error '+res.status+': '+errText.substring(0,80),false);
     return[];
   }
   const data=await res.json();
@@ -463,7 +469,8 @@ async function fetchSoldComps(baseQuery){
   let token;
   try{ token=await getEbayToken(); }
   catch(e){
-    console.warn('eBay token failed, falling back:',e);
+    console.warn('eBay token failed:',e);
+    setStatus('eBay connection failed: '+e.message,false);
     return[];
   }
 
