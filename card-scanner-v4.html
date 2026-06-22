@@ -288,7 +288,7 @@ const previewImg=document.getElementById('preview-img');
 
 async function startCamera(){
   try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080}}});
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});
     video.srcObject=stream;video.play();
     document.getElementById('scan-btn').disabled=false;
   }catch(e){
@@ -378,8 +378,33 @@ function buildGradeMap(listings){
 }
 
 // ════════════════════════════════════════════════════════
-// eBay scraper
+// eBay API Integration
 // ════════════════════════════════════════════════════════
+const EBAY_APP_ID='aa93911a9-d4e396e4';
+const EBAY_CERT_ID='SBX-a93911a9947f-3ceb-4a17-a7fd-458a';
+// Sandbox = true until Production keys arrive
+const EBAY_SANDBOX=true;
+const EBAY_BASE=EBAY_SANDBOX
+  ?'https://api.sandbox.ebay.com'
+  :'https://api.ebay.com';
+
+let ebayToken=null, ebayTokenExpiry=0;
+
+async function getEbayToken(){
+  if(ebayToken&&Date.now()<ebayTokenExpiry)return ebayToken;
+  const creds=btoa(`${EBAY_APP_ID}:${EBAY_CERT_ID}`);
+  const res=await fetch(`${EBAY_BASE}/identity/v1/oauth2/token`,{
+    method:'POST',
+    headers:{'Authorization':`Basic ${creds}`,'Content-Type':'application/x-www-form-urlencoded'},
+    body:'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope'
+  });
+  if(!res.ok)throw new Error('eBay auth failed: '+res.status);
+  const data=await res.json();
+  ebayToken=data.access_token;
+  ebayTokenExpiry=Date.now()+(data.expires_in-60)*1000;
+  return ebayToken;
+}
+
 function detectGrade(text){
   const t=text.toUpperCase();
   if(/PSA\s*10/.test(t))return'PSA 10';
@@ -399,29 +424,80 @@ function detectGrade(text){
   if(/PSA|BGS|SGC|CGC|GRADED|SLAB/.test(t))return'Graded';
   return'Raw';
 }
-function parseEbayHTML(html){
-  const doc=new DOMParser().parseFromString(html,'text/html');
-  const items=[];
-  doc.querySelectorAll('.s-item').forEach(el=>{
-    try{
-      const title=(el.querySelector('.s-item__title')?.textContent||'').trim();
-      const priceText=(el.querySelector('.s-item__price')?.textContent||'').trim();
-      const date=(el.querySelector('.s-item__ended-date,.s-item__listingDate')?.textContent||'').replace('Sold','').trim();
-      const url=el.querySelector('a.s-item__link')?.href||'';
-      if(!title||!priceText||title==='Shop on eBay'||!priceText.includes('$'))return;
-      const cleanPrice=priceText.split(' to ')[0].trim();
-      items.push({title:title.substring(0,80),price:cleanPrice,dateSold:date||null,condition:detectGrade(title),url:url.split('?')[0]||null});
-    }catch(e){}
+
+// Search eBay for one specific grade query, return listings
+async function ebaySearch(query, token){
+  const params=new URLSearchParams({
+    q:query,
+    limit:'50',
+    filter:'buyingOptions:{AUCTION|FIXED_PRICE},conditions:{USED}',
+    sort:'endingSoonest'
   });
-  return items.slice(0,16);
+  const url=`${EBAY_BASE}/buy/browse/v1/item_summary/search?${params}`;
+  const res=await fetch(url,{
+    headers:{
+      'Authorization':`Bearer ${token}`,
+      'X-EBAY-C-MARKETPLACE-ID':'EBAY_US',
+      'Content-Type':'application/json'
+    }
+  });
+  if(!res.ok){
+    console.warn('eBay search failed:',res.status, await res.text());
+    return[];
+  }
+  const data=await res.json();
+  return(data.itemSummaries||[]).map(item=>{
+    const price=item.price?.value?`$${parseFloat(item.price.value).toFixed(2)}`:null;
+    const title=item.title||'';
+    const condition=detectGrade(title);
+    const endDate=item.itemEndDate?new Date(item.itemEndDate).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):null;
+    return{
+      title:title.substring(0,80),
+      price,
+      dateSold:endDate,
+      condition,
+      url:item.itemWebUrl||null
+    };
+  }).filter(i=>i.price);
 }
-async function fetchSoldComps(query){
-  const ebayUrl=`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_Complete=1&LH_Sold=1&_sop=13`;
-  try{
-    const res=await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(ebayUrl)}`,{signal:AbortSignal.timeout(12000)});
-    if(!res.ok)throw new Error();
-    return parseEbayHTML((await res.json()).contents||'');
-  }catch(e){return[];}
+
+// Run grade-specific searches in parallel for rich comp data
+async function fetchSoldComps(baseQuery){
+  let token;
+  try{ token=await getEbayToken(); }
+  catch(e){
+    console.warn('eBay token failed, falling back:',e);
+    return[];
+  }
+
+  // Run targeted searches for each grade + raw in parallel
+  const gradeQueries=[
+    {q:`${baseQuery}`, label:'all'},
+    {q:`${baseQuery} PSA 10`, label:'PSA 10'},
+    {q:`${baseQuery} PSA 9`, label:'PSA 9'},
+    {q:`${baseQuery} PSA 8`, label:'PSA 8'},
+    {q:`${baseQuery} PSA 7`, label:'PSA 7'},
+    {q:`${baseQuery} PSA 6`, label:'PSA 6'},
+    {q:`${baseQuery} PSA 5`, label:'PSA 5'},
+    {q:`${baseQuery} raw`, label:'raw'},
+  ];
+
+  const results=await Promise.allSettled(
+    gradeQueries.map(({q})=>ebaySearch(q,token))
+  );
+
+  // Merge and deduplicate by URL
+  const seen=new Set();
+  const all=[];
+  results.forEach(r=>{
+    if(r.status==='fulfilled'){
+      r.value.forEach(item=>{
+        const key=item.url||item.title;
+        if(!seen.has(key)){seen.add(key);all.push(item);}
+      });
+    }
+  });
+  return all;
 }
 
 // ════════════════════════════════════════════════════════
@@ -444,16 +520,18 @@ async function claudeCall(messages,tools){
 // ════════════════════════════════════════════════════════
 // Render: Price Ladder
 // ════════════════════════════════════════════════════════
-function renderPriceLadder(gradeMap){
+function renderPriceLadder(gradeMap, currentGrade){
   const present=LADDER_GRADES.filter(g=>gradeMap[g]?.grossAvg);
   if(!present.length)return'';
   const maxNet=Math.max(...present.map(g=>gradeMap[g].netAvg));
+  const isAlreadyGraded=!!(currentGrade);
   const rows=present.map(g=>{
     const gm=gradeMap[g];
     const pct=maxNet>0?Math.round((gm.netAvg/maxNet)*100):0;
-    const isR=REALISTIC_GRADES.includes(g);
-    return`<div class="ladder-row${isR?' realistic':''}">
-      <div class="ladder-grade">${g}${isR?' ★':''}</div>
+    const isHighlight=isAlreadyGraded?(g===currentGrade):REALISTIC_GRADES.includes(g);
+    const starLabel=isAlreadyGraded?(g===currentGrade?' ◄':''):(REALISTIC_GRADES.includes(g)?' ★':'');
+    return`<div class="ladder-row${isHighlight?' realistic':''}">
+      <div class="ladder-grade">${g}${starLabel}</div>
       <div class="ladder-bar-wrap"><div class="ladder-bar" style="width:${pct}%"></div></div>
       <div class="ladder-prices">
         <div class="ladder-gross">${fmtG(gm.grossAvg)}</div>
@@ -462,8 +540,11 @@ function renderPriceLadder(gradeMap){
       <div class="ladder-count">${gm.count} sale${gm.count!==1?'s':''}</div>
     </div>`;
   }).join('');
+  const note=isAlreadyGraded
+    ?`◄ This card's grade &nbsp;·&nbsp; Net = after 13% eBay fee`
+    :`★ Realistic grading outcome (PSA 5–7) &nbsp;·&nbsp; Net = after 13% eBay fee`;
   return`<div class="price-ladder">${rows}</div>
-  <div class="ladder-note">★ Realistic grading outcome (PSA 5–7) &nbsp;·&nbsp; Net = after 13% eBay fee</div>`;
+  <div class="ladder-note">${note}</div>`;
 }
 
 // ════════════════════════════════════════════════════════
@@ -514,25 +595,73 @@ function renderListings(filtered){
 function makeDecision(ci, listings, gradeMap){
   const isGraded=!!(ci.gradingInfo);
 
+  // ── GRADED CARD LOGIC ──────────────────────────────────
+  // Use comps that match the card's actual grade, not raw prices
   if(isGraded){
-    const netAvg=avgNetOf(listings);
-    if(netAvg>=400)return{decision:'keep',reason:`Already graded (${ci.gradingInfo}). Strong net value of ${fmtN(avgGrossOf(listings))} after eBay fees. Hold.`};
-    if(netAvg>=60)return{decision:'sell',reason:`Graded at ${ci.gradingInfo}. Net after eBay fees: ${fmtN(avgGrossOf(listings))}. Good time to move it.`};
-    return{decision:'sell',reason:`Graded at ${ci.gradingInfo} but net value is modest (${fmtN(avgGrossOf(listings))}). Sell now.`};
+    const grade=ci.gradingInfo; // e.g. "PSA 9"
+    // Normalize grade key to match our gradeMap keys (PSA 9, BGS 9.5, etc.)
+    const gradeKey=Object.keys(gradeMap).find(k=>k.toUpperCase()===grade.toUpperCase())||grade;
+    const gradeData=gradeMap[gradeKey];
+    const gradeNetAvg=gradeData?.netAvg||null;
+    const gradeGrossAvg=gradeData?.grossAvg||null;
+    const gradeCount=gradeData?.count||0;
+
+    // Can we crack out and resubmit for a higher grade?
+    // Find the next grade tier above this one
+    const GRADE_ORDER=['PSA 5','PSA 6','PSA 7','PSA 8','PSA 9','PSA 10','BGS 9','BGS 9.5'];
+    const gradeIdx=GRADE_ORDER.indexOf(gradeKey);
+    const higherGrades=gradeIdx>=0?GRADE_ORDER.slice(gradeIdx+1):[];
+    const nextGradeData=higherGrades.map(g=>gradeMap[g]).find(d=>d?.netAvg);
+    const nextGradeKey=higherGrades.find(g=>gradeMap[g]?.netAvg);
+    const crossoverCost=30; // crack-out + resubmit cost estimate
+
+    if(gradeNetAvg!=null){
+      // Check if crossover/resubmit makes sense
+      if(nextGradeData&&nextGradeKey){
+        const crossoverGain=nextGradeData.netAvg-gradeNetAvg-crossoverCost;
+        if(crossoverGain>gradeNetAvg*0.4&&crossoverGain>40){
+          return{
+            decision:'grade',
+            reason:`${grade} nets ${fmtG(gradeNetAvg)}. Cracking out to resubmit for ${nextGradeKey} (avg net ${fmtG(nextGradeData.netAvg)}) could gain ~${fmtG(crossoverGain)} after ~$${crossoverCost} crack/resubmit cost — worth considering if the card looks clean.`,
+            math:{gradeGrossAvg,gradeNetAvg,gradeLabel:grade,nextGradeKey,nextGradeNet:nextGradeData.netAvg,crossoverGain,crossoverCost}
+          };
+        }
+      }
+      // Sell vs hold based on current grade value
+      if(gradeNetAvg>=500)return{
+        decision:'keep',
+        reason:`${grade} comps average ${fmtG(gradeNetAvg)} net (${fmtG(gradeGrossAvg)} gross) across ${gradeCount} sale${gradeCount!==1?'s':''}. Strong value — hold unless you need liquidity.`,
+        math:{gradeGrossAvg,gradeNetAvg,gradeLabel:grade}
+      };
+      if(gradeNetAvg>=80)return{
+        decision:'sell',
+        reason:`${grade} comps average ${fmtG(gradeNetAvg)} net (${fmtG(gradeGrossAvg)} gross) across ${gradeCount} sale${gradeCount!==1?'s':''}. Solid market — good time to move it.`,
+        math:{gradeGrossAvg,gradeNetAvg,gradeLabel:grade}
+      };
+      return{
+        decision:'sell',
+        reason:`${grade} comps average ${fmtG(gradeNetAvg)} net (${fmtG(gradeGrossAvg)} gross). Modest value — sell now rather than holding.`,
+        math:{gradeGrossAvg,gradeNetAvg,gradeLabel:grade}
+      };
+    }
+    // Not enough grade-specific comps — use all comps as proxy
+    const allNet=avgNetOf(listings);
+    if(allNet>=200)return{decision:'keep',reason:`${grade} card with limited grade-specific comps. Overall market avg ~${fmtG(allNet)} net. Hold and monitor.`};
+    if(allNet>=40)return{decision:'sell',reason:`${grade} card. Limited grade-specific comps but overall market suggests ~${fmtG(allNet)} net. Sell.`};
+    return{decision:'sell',reason:`${grade} card with limited comp data. Check eBay manually below.`};
   }
 
-  // Raw card
+  // ── RAW CARD LOGIC ─────────────────────────────────────
+  // Compare raw value vs realistic grading outcome (PSA 5-7)
   const rawNetAvg=gradeMap['Raw']?.netAvg||avgNetOf(listings);
   const rawGrossAvg=gradeMap['Raw']?.grossAvg||avgGrossOf(listings);
 
-  // Realistic grading target: PSA 5-7 net average
   const realisticNetPrices=REALISTIC_GRADES.map(g=>gradeMap[g]?.netAvg).filter(Boolean);
   const realisticNetAvg=realisticNetPrices.length?realisticNetPrices.reduce((a,b)=>a+b,0)/realisticNetPrices.length:null;
   const realisticLabel=realisticNetPrices.length===1
     ?REALISTIC_GRADES.find(g=>gradeMap[g]?.netAvg)
     :`PSA ${realisticNetPrices.length===2?'5–6':'5–7'} avg`;
 
-  // Higher grade upside for reference
   const psa8net=gradeMap['PSA 8']?.netAvg;
   const psa9net=gradeMap['PSA 9']?.netAvg;
   const psa10net=gradeMap['PSA 10']?.netAvg;
@@ -546,28 +675,27 @@ function makeDecision(ci, listings, gradeMap){
     if(netGain>rawNetAvg*0.25&&netGain>15){
       return{
         decision:'grade',
-        reason:`Realistic outcome (${realisticLabel}) nets ${fmtG(realisticNetAvg)} after eBay fees vs. selling raw at ${fmtG(rawNetAvg)}. Net gain after $${GRADING_COST} grading cost: ~${fmtG(netGain)} (+${roi.toFixed(0)}% ROI).${upsideLine}`,
-        math:{rawGrossAvg,rawNetAvg,realisticNetAvg,realisticLabel,netGain,roi,psa10net}
+        reason:`Realistic outcome (${realisticLabel}) nets ${fmtG(realisticNetAvg)} vs. selling raw at ${fmtG(rawNetAvg)}. Net gain after $${GRADING_COST} grading: ~${fmtG(netGain)} (+${roi.toFixed(0)}% ROI).${upsideLine}`,
+        math:{rawGrossAvg,rawNetAvg,realisticNetAvg,realisticLabel,netGain,roi,psa10net,isRaw:true}
       };
     }
     if(netGain>0){
       return{
         decision:'sell',
-        reason:`Grading to PSA 5–7 only adds ~${fmtG(netGain)} net after $${GRADING_COST} cost — thin margin. Sell raw at ${fmtG(rawNetAvg)} net and avoid the risk.`,
-        math:{rawGrossAvg,rawNetAvg,realisticNetAvg,realisticLabel,netGain,roi}
+        reason:`PSA 5–7 only adds ~${fmtG(netGain)} net after $${GRADING_COST} cost — thin margin. Sell raw at ${fmtG(rawNetAvg)} net.`,
+        math:{rawGrossAvg,rawNetAvg,realisticNetAvg,realisticLabel,netGain,roi,isRaw:true}
       };
     }
     return{
       decision:'sell',
-      reason:`PSA 5–7 net (${fmtG(realisticNetAvg)}) doesn't clear raw net (${fmtG(rawNetAvg)}) plus $${GRADING_COST} grading cost. Sell raw.`,
-      math:{rawGrossAvg,rawNetAvg,realisticNetAvg,realisticLabel,netGain,roi}
+      reason:`PSA 5–7 net (${fmtG(realisticNetAvg)}) doesn't clear raw net (${fmtG(rawNetAvg)}) + $${GRADING_COST} grading cost. Sell raw.`,
+      math:{rawGrossAvg,rawNetAvg,realisticNetAvg,realisticLabel,netGain,roi,isRaw:true}
     };
   }
 
-  // Fallback on raw value alone
-  if(rawNetAvg>=120)return{decision:'keep',reason:`Raw net avg ${fmtG(rawNetAvg)} — meaningful value. Hold and gather more graded comps before deciding.`};
-  if(rawNetAvg>=25)return{decision:'sell',reason:`Raw net avg ${fmtG(rawNetAvg)}. Not enough graded comps to calculate ROI — sell raw to avoid grading risk.`};
-  if(rawNetAvg)return{decision:'sell',reason:`Low net value (${fmtG(rawNetAvg)}). Not worth grading cost. Move it.`};
+  if(rawNetAvg>=120)return{decision:'keep',reason:`Raw net avg ${fmtG(rawNetAvg)} — meaningful value. Gather more graded comps before deciding.`};
+  if(rawNetAvg>=25)return{decision:'sell',reason:`Raw net avg ${fmtG(rawNetAvg)}. Not enough graded comps to calculate ROI — sell raw.`};
+  if(rawNetAvg)return{decision:'sell',reason:`Low net value (${fmtG(rawNetAvg)}). Not worth grading cost.`};
   return{decision:'keep',reason:`Insufficient comp data. Check eBay manually below.`};
 }
 
@@ -596,8 +724,8 @@ function buildResult(){
       </div>
     </div>
 
-    <p class="section-label">Price by grade — gross / net after 13% eBay fee</p>
-    ${renderPriceLadder(gradeMap)}
+    <p class="section-label">eBay sold comps by grade — gross / net after 13% eBay fee</p>
+    ${renderPriceLadder(gradeMap, ci.gradingInfo)}
 
     <p class="section-label">Listings by grade</p>
     <div class="grade-filters">${GRADE_FILTERS.map(g=>`<button class="gf-btn${activeFilter===g?' active':''}" data-grade="${g}">${g}</button>`).join('')}</div>
@@ -609,10 +737,12 @@ function buildResult(){
       <div class="decision-title ${decision.decision}">${icons[decision.decision]} ${labels[decision.decision]}</div>
       <div class="decision-detail">${decision.reason}</div>
       ${decision.math?`<div class="decision-math">
-        Raw gross <b>${fmtG(decision.math.rawGrossAvg)}</b> → net <b>${fmtG(decision.math.rawNetAvg)}</b><br>
+        ${decision.math.isRaw?`Raw gross <b>${fmtG(decision.math.rawGrossAvg)}</b> → net <b>${fmtG(decision.math.rawNetAvg)}</b><br>
         ${decision.math.realisticLabel} net avg <b>${fmtG(decision.math.realisticNetAvg)}</b><br>
         Net gain after $${GRADING_COST} grading: <b>${fmtG(decision.math.netGain)}</b> (<b>${decision.math.roi>0?'+':''}${decision.math.roi?.toFixed(0)}%</b>)
-        ${decision.math.psa10net?`<br>PSA 10 ceiling net: <b>${fmtG(decision.math.psa10net)}</b>`:''}
+        ${decision.math.psa10net?`<br>PSA 10 ceiling net: <b>${fmtG(decision.math.psa10net)}</b>`:''}`
+        :`${decision.math.gradeLabel} gross <b>${fmtG(decision.math.gradeGrossAvg)}</b> → net <b>${fmtG(decision.math.gradeNetAvg)}</b>
+        ${decision.math.nextGradeKey?`<br>vs ${decision.math.nextGradeKey} net <b>${fmtG(decision.math.nextGradeNet)}</b> − crack/resubmit ~$${decision.math.crossoverCost} = gain <b>${fmtG(decision.math.crossoverGain)}</b>`:''}`}
       </div>`:''}
     </div>
     <div style="font-size:11px;color:var(--green);margin-bottom:6px">✓ Saved to collection</div>
@@ -638,13 +768,22 @@ function saveCollection(){localStorage.setItem('card_collection_v4',JSON.stringi
 
 function addToCollection(ci,listings,decision){
   const gradeMap=buildGradeMap(listings);
-  const rawGross=gradeMap['Raw']?.grossAvg||avgGrossOf(listings);
+  const isGraded=!!(ci.gradingInfo);
+  // For graded cards use the graded comp avg; for raw use raw comps
+  let displayGross, displayNet;
+  if(isGraded){
+    const gradeKey=Object.keys(gradeMap).find(k=>k.toUpperCase()===(ci.gradingInfo||'').toUpperCase())||ci.gradingInfo;
+    displayGross=gradeMap[gradeKey]?.grossAvg||avgGrossOf(listings);
+  } else {
+    displayGross=gradeMap['Raw']?.grossAvg||avgGrossOf(listings);
+  }
+  displayNet=netOf(displayGross);
   const entry={
     id:Date.now(),
     player:ci.player||'Unknown',year:ci.year||'',brand:ci.brand||'',
     set:ci.set||'',cardNumber:ci.cardNumber||'',
     variation:ci.variation||'',gradingInfo:ci.gradingInfo||'',sport:ci.sport||'',
-    rawGross, rawNet:netOf(rawGross),
+    displayGross, displayNet,
     decision:decision.decision, reason:decision.reason,
     scannedAt:new Date().toLocaleDateString('en-US')
   };
@@ -675,15 +814,15 @@ function renderCollection(){
   // Sort
   cards.sort((a,b)=>{
     if(sortVal==='date')return b.id-a.id;
-    if(sortVal==='value-desc')return(b.rawGross||0)-(a.rawGross||0);
-    if(sortVal==='value-asc')return(a.rawGross||0)-(b.rawGross||0);
+    if(sortVal==='value-desc')return(b.displayGross||b.rawGross||0)-(a.displayGross||a.rawGross||0);
+    if(sortVal==='value-asc')return(a.displayGross||a.rawGross||0)-(b.displayGross||b.rawGross||0);
     if(sortVal==='player')return(a.player||'').localeCompare(b.player||'');
     if(sortVal==='decision')return(a.decision||'').localeCompare(b.decision||'');
     return 0;
   });
 
   // Summary stats
-  const totalNet=collection.reduce((s,c)=>s+(c.rawNet||0),0);
+  const totalNet=collection.reduce((s,c)=>s+(c.displayNet||c.rawNet||0),0);
   const sells=collection.filter(c=>c.decision==='sell').length;
   const keeps=collection.filter(c=>c.decision==='keep').length;
   const grades=collection.filter(c=>c.decision==='grade').length;
@@ -711,8 +850,8 @@ function renderCollection(){
       const meta=[c.year,c.brand,c.set,c.cardNumber,c.variation,c.gradingInfo||'Raw'].filter(Boolean).join(' · ');
       return`<tr>
         <td><div class="td-player">${c.player}</div><div class="td-meta" title="${meta}">${meta}</div></td>
-        <td><div class="td-price">${fmtG(c.rawGross)}</div></td>
-        <td><div class="td-price">${fmtG(c.rawNet)}</div></td>
+        <td><div class="td-price">${fmtG(c.displayGross||c.rawGross)}</div></td>
+        <td><div class="td-price">${fmtG(c.displayNet||c.rawNet)}</div></td>
         <td><span class="badge ${c.decision}">${icons[c.decision]||c.decision}</span></td>
         <td><button class="del-btn" onclick="deleteCard(${c.id})">✕</button></td>
       </tr>
@@ -729,7 +868,7 @@ function exportCSV(){
   const headers=['Player','Year','Brand','Set','Card #','Variation','Grade/Condition','Sport','Gross Avg','Net Avg (after 13%)','Decision','Reason','Scanned'];
   const rows=collection.map(c=>[
     c.player,c.year,c.brand,c.set,c.cardNumber,c.variation,c.gradingInfo||'Raw',c.sport,
-    c.rawGross?c.rawGross.toFixed(2):'',c.rawNet?c.rawNet.toFixed(2):'',
+    (c.displayGross||c.rawGross)?(c.displayGross||c.rawGross).toFixed(2):'', (c.displayNet||c.rawNet)?(c.displayNet||c.rawNet).toFixed(2):'',
     c.decision,`"${(c.reason||'').replace(/"/g,"'")}"`,c.scannedAt
   ].join(','));
   const csv=[headers.join(','),...rows].join('\n');
@@ -776,8 +915,8 @@ Raw JSON only, no markdown.`}
   const query=cardInfo.ebayQuery||[cardInfo.year,cardInfo.brand,cardInfo.player,cardInfo.cardNumber].filter(Boolean).join(' ');
   allListings=await fetchSoldComps(query);
 
-  if(allListings.length<4){
-    setStatus('Estimating prices across grade range…',true);
+  if(allListings.length<6){
+    setStatus('eBay API returned limited results — supplementing with estimates…',true);
     try{
       const est=await claudeCall([{role:'user',content:`You are a sports card market expert with deep knowledge of recent eBay sold prices.
 
