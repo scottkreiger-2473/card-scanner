@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Card Scanner</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#ffffff;--bg2:#f5f5f3;--bg3:#ebebea;
+    --text:#1a1a1a;--text2:#6b6b6b;--text3:#9a9a9a;
+    --border:rgba(0,0,0,0.12);--border2:rgba(0,0,0,0.2);
+    --green:#085041;--green-bg:#E1F5EE;--green-border:#5DCAA5;
+    --red:#993C1D;--red-bg:#FAECE7;--red-border:#F0997B;
+    --blue:#2D4DA0;--blue-bg:#EEF3FF;--blue-border:#7B96E8;
+    --sold-bg:#EAF3DE;--sold-text:#3B6D11;
+    --radius:12px;--radius-sm:8px;
+  }
+  @media(prefers-color-scheme:dark){
+    :root{
+      --bg:#1c1c1e;--bg2:#2c2c2e;--bg3:#3a3a3c;
+      --text:#f5f5f5;--text2:#ababab;--text3:#6b6b6b;
+      --border:rgba(255,255,255,0.1);--border2:rgba(255,255,255,0.2);
+      --green:#5DCAA5;--green-bg:#04342C;--green-border:#1D9E75;
+      --red:#F0997B;--red-bg:#4A1B0C;--red-border:#D85A30;
+      --blue:#85B7EB;--blue-bg:#0D1F3C;--blue-border:#3A5FA0;
+      --sold-bg:#173404;--sold-text:#97C459;
+    }
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg3);color:var(--text);min-height:100vh}
+  #app{max-width:520px;margin:0 auto;padding-bottom:40px}
+
+  /* Nav */
+  .top-nav{background:var(--bg);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100;display:flex;align-items:center;padding:0 16px}
+  .nav-title{font-size:16px;font-weight:700;padding:14px 0;flex:1}
+  .nav-tabs{display:flex}
+  .nav-tab{font-size:13px;font-weight:500;padding:14px 16px;border:none;background:none;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent}
+  .nav-tab.active{color:var(--text);border-bottom-color:var(--text)}
+
+  /* Panels */
+  .panel{display:none;padding:16px}
+  .panel.active{display:block}
+
+  /* API Key */
+  #apikey-screen{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+  #apikey-screen h2{font-size:14px;font-weight:600;margin-bottom:4px}
+  #apikey-screen p{font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.5}
+  #apikey-input{width:100%;padding:9px 12px;font-size:13px;border-radius:var(--radius-sm);border:1px solid var(--border2);background:var(--bg2);color:var(--text);margin-bottom:8px;font-family:monospace}
+  #save-key-btn{padding:8px 16px;font-size:13px;font-weight:600;border-radius:var(--radius-sm);border:none;background:var(--text);color:var(--bg);cursor:pointer}
+  #change-key-btn{font-size:12px;color:var(--blue);background:none;border:none;cursor:pointer;padding:0;margin-left:10px}
+  .key-ok{font-size:12px;color:var(--green);display:none;margin-top:6px}
+
+  /* Upload */
+  .upload-zone{border:2px dashed var(--border2);border-radius:var(--radius);padding:32px 16px;text-align:center;cursor:pointer;margin-bottom:12px;transition:border-color .15s}
+  .upload-zone:hover{border-color:var(--text)}
+  .upload-zone-icon{font-size:36px;margin-bottom:8px}
+  .upload-zone-text{font-size:14px;font-weight:500;color:var(--text);margin-bottom:4px}
+  .upload-zone-sub{font-size:12px;color:var(--text3)}
+  #file-input{display:none}
+  #preview-img{width:100%;border-radius:var(--radius);display:none;object-fit:contain;background:#000;max-height:300px;margin-bottom:12px}
+  .btn-primary{width:100%;padding:13px;font-size:15px;font-weight:600;border-radius:var(--radius);border:none;background:var(--text);color:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+  .btn-primary:disabled{opacity:0.35;cursor:not-allowed}
+  .btn-secondary{width:100%;margin-top:8px;padding:10px;font-size:14px;border-radius:var(--radius);border:1px solid var(--border2);background:transparent;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+
+  /* Status/Error */
+  #status{margin-top:12px}
+  .status-row{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2);padding:6px 0}
+  .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--text2);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #error-msg{margin-top:10px;font-size:13px;color:var(--red);display:none;padding:10px 14px;background:var(--red-bg);border-radius:var(--radius-sm);border:1px solid var(--red-border);line-height:1.5}
+
+  /* Result */
+  #result{display:none;margin-top:14px}
+  .card-header{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:10px}
+  .card-player{font-size:17px;font-weight:700;margin-bottom:2px}
+  .card-meta{font-size:13px;color:var(--text2);margin-bottom:8px;line-height:1.5}
+  .tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+  .tag{font-size:11px;padding:3px 8px;border-radius:20px;border:1px solid var(--border);color:var(--text2)}
+  .tag.graded{background:var(--green-bg);color:var(--green);border-color:var(--green-border)}
+  .tag.raw{background:#FAEEDA;color:#633806;border-color:#EF9F27}
+
+  /* Edit fields */
+  .edit-section{border-top:1px solid var(--border);padding-top:10px;margin-top:8px}
+  .edit-label{font-size:11px;color:var(--text3);margin-bottom:6px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+  .edit-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+  .edit-input{flex:1;min-width:100px;font-size:12px;padding:6px 9px;border-radius:6px;border:1px solid var(--border2);background:var(--bg2);color:var(--text)}
+  .edit-input.narrow{flex:0 0 65px;min-width:0}
+  .edit-btn{padding:7px 14px;font-size:12px;font-weight:600;border-radius:6px;border:none;background:var(--text);color:var(--bg);cursor:pointer;white-space:nowrap}
+
+  /* Section label */
+  .section-label{font-size:11px;font-weight:700;color:var(--text3);letter-spacing:.06em;text-transform:uppercase;margin:14px 0 7px}
+
+  /* Grade filters */
+  .grade-filters{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+  .gf-btn{font-size:11px;padding:5px 10px;border-radius:20px;border:1px solid var(--border2);background:transparent;color:var(--text);cursor:pointer}
+  .gf-btn.active{background:var(--text);color:var(--bg);border-color:var(--text)}
+
+  /* Stats */
+  .stats-row{display:flex;gap:8px;margin-bottom:10px}
+  .stat-box{flex:1;background:var(--bg2);border-radius:var(--radius-sm);padding:9px 11px}
+  .stat-label{font-size:11px;color:var(--text2);margin-bottom:2px}
+  .stat-val{font-size:18px;font-weight:700;color:var(--text)}
+  .stat-sub{font-size:10px;color:var(--green);margin-top:1px}
+
+  /* Listings */
+  .listings-wrap{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:10px}
+  .listing-item{padding:9px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)}
+  .listing-item:last-child{border-bottom:none}
+  .listing-ph{width:38px;height:38px;border-radius:var(--radius-sm);background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px}
+  .listing-info{flex:1;min-width:0}
+  .listing-name{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .listing-sub{font-size:10px;color:var(--text2);margin-top:2px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+  .active-pill{font-size:9px;background:#FFF3CD;color:#856404;border-radius:3px;padding:1px 5px;font-weight:700}
+  .listing-link{font-size:10px;color:var(--blue);text-decoration:none;display:block;margin-top:2px}
+  .listing-prices{text-align:right;flex-shrink:0}
+  .listing-gross{font-size:13px;font-weight:600;color:var(--text)}
+  .listing-net{font-size:10px;color:var(--green)}
+  .no-comps{font-size:13px;color:var(--text2);padding:16px;text-align:center}
+
+  /* Override */
+  .override-row{display:flex;gap:8px;margin-bottom:10px}
+  .override-btn{flex:1;padding:10px 6px;font-size:13px;font-weight:600;border-radius:var(--radius-sm);border:1px solid var(--border2);background:transparent;color:var(--text);cursor:pointer}
+  .override-btn.sell.active{background:var(--red-bg);color:var(--red);border-color:var(--red-border)}
+  .override-btn.keep.active{background:var(--green-bg);color:var(--green);border-color:var(--green-border)}
+  .override-btn.grade.active{background:var(--blue-bg);color:var(--blue);border-color:var(--blue-border)}
+
+  /* What-if calculator */
+  .calc-box{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:10px}
+  .calc-box-title{font-size:13px;font-weight:600;margin-bottom:10px}
+  .calc-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .calc-label{font-size:12px;color:var(--text2);white-space:nowrap}
+  .calc-select{font-size:13px;padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border2);background:var(--bg2);color:var(--text);cursor:pointer;flex:1}
+  .calc-result{font-size:13px;line-height:1.7;padding:10px 12px;border-radius:var(--radius-sm)}
+  .calc-result.positive{background:var(--green-bg);border:1px solid var(--green-border)}
+  .calc-result.negative{background:var(--red-bg);border:1px solid var(--red-border)}
+  .calc-result.neutral{background:var(--bg2);border:1px solid var(--border)}
+
+  /* eBay buttons */
+  .ebay-sold-btn{width:100%;padding:13px;font-size:14px;font-weight:600;border-radius:var(--radius);border:none;background:var(--text);color:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px}
+  .ebay-active-btn{width:100%;padding:10px;font-size:13px;border-radius:var(--radius-sm);border:1px solid var(--border2);background:transparent;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:4px}
+  .ebay-note{font-size:11px;color:var(--text3);text-align:center;padding:4px 0 8px}
+
+  /* Collection */
+  .coll-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .coll-toolbar input{font-size:13px;padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border2);background:var(--bg);color:var(--text);flex:1;min-width:0}
+  .coll-toolbar select{font-size:13px;padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border2);background:var(--bg);color:var(--text);cursor:pointer}
+  .export-btn{font-size:12px;padding:6px 12px;border-radius:var(--radius-sm);border:1px solid var(--border2);background:var(--bg);color:var(--text);cursor:pointer;white-space:nowrap}
+  .coll-summary{display:flex;gap:8px;margin-bottom:12px}
+  .sum-box{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 11px}
+  .sum-label{font-size:11px;color:var(--text2);margin-bottom:2px}
+  .sum-val{font-size:16px;font-weight:700;color:var(--text)}
+  .coll-empty{font-size:13px;color:var(--text3);text-align:center;padding:32px 16px;background:var(--bg);border-radius:var(--radius);border:1px solid var(--border)}
+  .coll-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px}
+  .coll-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px}
+  .coll-card-player{font-size:15px;font-weight:700;margin-bottom:2px}
+  .coll-card-meta{font-size:12px;color:var(--text2);line-height:1.4}
+  .coll-card-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+  .coll-card-price{font-size:15px;font-weight:700}
+  .coll-card-net{font-size:11px;color:var(--green)}
+  .coll-card-bottom{display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+  .coll-card-reason{font-size:11px;color:var(--text2);line-height:1.4;flex:1;margin-right:10px}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap}
+  .badge.sell{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)}
+  .badge.keep{background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)}
+  .badge.grade{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-border)}
+  .del-btn{font-size:22px;color:var(--text3);background:none;border:none;cursor:pointer;padding:4px 8px;line-height:1}
+  .fee-note{font-size:11px;color:var(--text3);margin-top:6px;padding:6px 10px;background:var(--bg2);border-radius:var(--radius-sm)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="top-nav">
+    <div class="nav-title">🃏 Card Scanner</div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" onclick="showTab('scan',this)">Scanner</button>
+      <button class="nav-tab" onclick="showTab('collection',this)">Collection <span id="coll-badge"></span></button>
+    </div>
+  </div>
+
+  <!-- SCANNER -->
+  <div class="panel active" id="panel-scan">
+    <div id="apikey-screen">
+      <h2>Anthropic API Key</h2>
+      <p>Stored only in your browser. Never sent anywhere except Anthropic directly.</p>
+      <input id="apikey-input" type="password" placeholder="sk-ant-..." autocomplete="off"/>
+      <button id="save-key-btn" onclick="saveKey()">Save key</button>
+      <button id="change-key-btn" onclick="changeKey()" style="display:none">Change key</button>
+      <div class="key-ok" id="key-ok">✓ Key saved</div>
+    </div>
+
+    <div class="upload-zone" onclick="document.getElementById('file-input').click()">
+      <div class="upload-zone-icon">📷</div>
+      <div class="upload-zone-text">Tap to upload card photo</div>
+      <div class="upload-zone-sub">Works best with good lighting, card filling the frame</div>
+    </div>
+    <input type="file" id="file-input" accept="image/*"/>
+    <img id="preview-img" alt="Card"/>
+
+    <button id="scan-btn" class="btn-primary" disabled>🔍 Identify card</button>
+    <button id="rescan-btn" class="btn-secondary" style="display:none">↩ Scan another card</button>
+
+    <div id="status"></div>
+    <div id="error-msg"></div>
+    <div id="result"></div>
+  </div>
+
+  <!-- COLLECTION -->
+  <div class="panel" id="panel-collection">
+    <div class="coll-summary" id="coll-summary"></div>
+    <div class="coll-toolbar">
+      <input type="text" id="coll-search" placeholder="Search cards…" oninput="renderCollection()"/>
+      <select id="coll-sort" onchange="renderCollection()">
+        <option value="date">Newest first</option>
+        <option value="value-desc">Highest value</option>
+        <option value="value-asc">Lowest value</option>
+        <option value="player">Player A–Z</option>
+        <option value="decision">Decision</option>
+      </select>
+      <button class="export-btn" onclick="exportCSV()">⬇ CSV</button>
+    </div>
+    <div id="coll-list"></div>
+    <div class="fee-note">All net prices reflect 13% eBay seller fee deducted from gross listed prices.</div>
+  </div>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────
+const EBAY_FEE=0.13;
+const GRADING_COST=20;
+const EBAY_PROXY='https://script.google.com/macros/s/AKfycbzWt-Q_c9Cbrsr3yiRZ7u6WQ4EW4mgSYCaCjM5jXiljZfjac7d63k2sASs5I0vBhdCs/exec';
+const GRADE_FILTERS=['All','Raw','PSA 1','PSA 2','PSA 3','PSA 4','PSA 5','PSA 6','PSA 7','PSA 8','PSA 8.5','PSA 9','PSA 9.5','PSA 10','BGS 1','BGS 2','BGS 3','BGS 4','BGS 5','BGS 6','BGS 7','BGS 8','BGS 8.5','BGS 9','BGS 9.5','BGS 10','SGC 1','SGC 2','SGC 3','SGC 4','SGC 5','SGC 6','SGC 7','SGC 8','SGC 9','SGC 9.5','SGC 10'];
+
+// ── State ──────────────────────────────────────────────
+let allListings=[], cardInfo=null, activeFilter='All';
+let collection=JSON.parse(localStorage.getItem('card_collection_v5')||'[]');
+let currentBase64=null;
+
+// ── API Key ────────────────────────────────────────────
+function getKey(){return localStorage.getItem('anthropic_api_key')||'';}
+function saveKey(){
+  const k=document.getElementById('apikey-input').value.trim();
+  if(!k){alert('Please enter your API key.');return;}
+  localStorage.setItem('anthropic_api_key',k);
+  document.getElementById('apikey-input').value='';
+  document.getElementById('key-ok').style.display='block';
+  document.getElementById('change-key-btn').style.display='inline';
+  setTimeout(()=>document.getElementById('key-ok').style.display='none',2000);
+}
+function changeKey(){document.getElementById('apikey-input').value='';document.getElementById('key-ok').style.display='none';}
+(()=>{if(getKey()){document.getElementById('change-key-btn').style.display='inline';document.getElementById('apikey-screen').querySelector('p').textContent='API key saved. Ready to scan.';}})();
+
+// ── Tabs ───────────────────────────────────────────────
+function showTab(tab,btn){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('panel-'+tab).classList.add('active');
+  btn.classList.add('active');
+  if(tab==='collection')renderCollection();
+}
+
+// ── File upload ────────────────────────────────────────
+document.getElementById('file-input').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=ev=>{
+    const img=new Image();
+    img.onload=()=>{
+      // Compress to max 1800px wide and JPEG quality 0.85 — well under 10MB
+      const MAX=1800;
+      let w=img.width, h=img.height;
+      if(w>MAX){h=Math.round(h*(MAX/w));w=MAX;}
+      const canvas=document.createElement('canvas');
+      canvas.width=w;canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const compressed=canvas.toDataURL('image/jpeg',0.85);
+      currentBase64=compressed.split(',')[1];
+      const prev=document.getElementById('preview-img');
+      prev.src=compressed;
+      prev.style.display='block';
+      document.querySelector('.upload-zone').style.display='none';
+      document.getElementById('scan-btn').disabled=false;
+      document.getElementById('result').style.display='none';
+      document.getElementById('error-msg').style.display='none';
+      document.getElementById('status').innerHTML='';
+      document.getElementById('rescan-btn').style.display='flex';
+    };
+    img.src=ev.target.result;
+  };
+  r.readAsDataURL(f);
+  e.target.value='';
+});
+
+document.getElementById('rescan-btn').addEventListener('click',()=>{
+  document.getElementById('preview-img').style.display='none';
+  document.querySelector('.upload-zone').style.display='block';
+  document.getElementById('scan-btn').disabled=true;
+  document.getElementById('rescan-btn').style.display='none';
+  document.getElementById('result').style.display='none';
+  document.getElementById('error-msg').style.display='none';
+  document.getElementById('status').innerHTML='';
+  allListings=[];cardInfo=null;activeFilter='All';currentBase64=null;
+});
+
+document.getElementById('scan-btn').addEventListener('click',()=>{
+  if(currentBase64)run(currentBase64);
+});
+
+// ── UI Helpers ─────────────────────────────────────────
+function setStatus(text,spinning){
+  document.getElementById('status').innerHTML=text
+    ?`<div class="status-row">${spinning?'<div class="spinner"></div>':'✅'} <span>${text}</span></div>`:'';
+}
+function clearError(){document.getElementById('error-msg').style.display='none';}
+function showError(msg){const e=document.getElementById('error-msg');e.innerHTML=msg;e.style.display='block';}
+
+// ── Claude API ─────────────────────────────────────────
+async function claudeCall(messages){
+  const key=getKey();
+  if(!key){showError('No API key — paste it above and hit Save.');return null;}
+  const res=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages})
+  });
+  if(!res.ok){const err=await res.json().catch(()=>({}));throw new Error(err.error?.message||'API error '+res.status);}
+  return res.json();
+}
+
+// ── eBay ───────────────────────────────────────────────
+function detectGrade(text){
+  const t=text.toUpperCase();
+  if(/PSA\s*10/.test(t))return'PSA 10';
+  if(/PSA\s*9\.5/.test(t))return'PSA 9.5';
+  if(/PSA\s*9\b/.test(t))return'PSA 9';
+  if(/PSA\s*8\.5/.test(t))return'PSA 8.5';
+  if(/PSA\s*8\b/.test(t))return'PSA 8';
+  if(/PSA\s*7\b/.test(t))return'PSA 7';
+  if(/PSA\s*6\b/.test(t))return'PSA 6';
+  if(/PSA\s*5\b/.test(t))return'PSA 5';
+  if(/PSA\s*4\b/.test(t))return'PSA 4';
+  if(/PSA\s*3\b/.test(t))return'PSA 3';
+  if(/PSA\s*2\b/.test(t))return'PSA 2';
+  if(/PSA\s*1\b/.test(t))return'PSA 1';
+  if(/BGS\s*10/.test(t))return'BGS 10';
+  if(/BGS\s*9\.5/.test(t))return'BGS 9.5';
+  if(/BGS\s*9\b/.test(t))return'BGS 9';
+  if(/BGS\s*8\.5/.test(t))return'BGS 8.5';
+  if(/BGS\s*8\b/.test(t))return'BGS 8';
+  if(/BGS\s*7\b/.test(t))return'BGS 7';
+  if(/BGS\s*6\b/.test(t))return'BGS 6';
+  if(/BGS\s*5\b/.test(t))return'BGS 5';
+  if(/BGS\s*4\b/.test(t))return'BGS 4';
+  if(/BGS\s*3\b/.test(t))return'BGS 3';
+  if(/BGS\s*2\b/.test(t))return'BGS 2';
+  if(/BGS\s*1\b/.test(t))return'BGS 1';
+  if(/SGC\s*10/.test(t))return'SGC 10';
+  if(/SGC\s*9\.5/.test(t))return'SGC 9.5';
+  if(/SGC\s*9\b/.test(t))return'SGC 9';
+  if(/SGC\s*8\.5/.test(t))return'SGC 8.5';
+  if(/SGC\s*8\b/.test(t))return'SGC 8';
+  if(/SGC\s*7\b/.test(t))return'SGC 7';
+  if(/SGC\s*6\b/.test(t))return'SGC 6';
+  if(/SGC\s*5\b/.test(t))return'SGC 5';
+  if(/SGC\s*4\b/.test(t))return'SGC 4';
+  if(/SGC\s*3\b/.test(t))return'SGC 3';
+  if(/SGC\s*2\b/.test(t))return'SGC 2';
+  if(/SGC\s*1\b/.test(t))return'SGC 1';
+  if(/PSA|BGS|SGC|CGC|GRADED|SLAB/.test(t))return'Graded';
+  return'Raw';
+}
+
+async function ebaySearch(query){
+  try{
+    const url=EBAY_PROXY+'?q='+encodeURIComponent(query);
+    const res=await fetch(url,{redirect:'follow',mode:'cors'});
+    if(!res.ok)return[];
+    const data=await res.json();
+    return(data.itemSummaries||[]).map(item=>{
+      const price=item.price?.value?`$${parseFloat(item.price.value).toFixed(2)}`:null;
+      const title=item.title||'';
+      return{title:title.substring(0,80),price,condition:detectGrade(title),url:item.itemWebUrl||null};
+    }).filter(i=>i.price);
+  }catch(e){return[];}
+}
+
+async function fetchAllComps(baseQuery){
+  const queries=[
+    baseQuery,
+    `${baseQuery} PSA 10`,`${baseQuery} PSA 9`,`${baseQuery} PSA 8`,
+    `${baseQuery} PSA 7`,`${baseQuery} PSA 6`,`${baseQuery} PSA 5`,
+    `${baseQuery} PSA 4`,`${baseQuery} PSA 3`,
+    `${baseQuery} BGS 10`,`${baseQuery} BGS 9.5`,`${baseQuery} BGS 9`,`${baseQuery} BGS 8`,
+    `${baseQuery} SGC 10`,`${baseQuery} SGC 9`,`${baseQuery} SGC 8`,
+    `${baseQuery} raw`
+  ];
+  const results=await Promise.allSettled(queries.map(q=>ebaySearch(q)));
+  const seen=new Set();const all=[];
+  results.forEach(r=>{
+    if(r.status==='fulfilled')r.value.forEach(item=>{
+      const key=item.url||item.title;
+      if(!seen.has(key)){seen.add(key);all.push(item);}
+    });
+  });
+  return all;
+}
+
+// ── Price math ─────────────────────────────────────────
+function priceNum(str){const m=(str||'').match(/\$?([\d,]+\.?\d*)/);return m?parseFloat(m[1].replace(',','')):null;}
+function netOf(g){return g==null?null:g*(1-EBAY_FEE);}
+function fmtG(n){return n==null?'—':'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fmtN(n){return fmtG(netOf(n));}
+function avgGrossOf(listings){const p=listings.map(l=>priceNum(l.price)).filter(Boolean);return p.length?p.reduce((a,b)=>a+b,0)/p.length:null;}
+
+function buildGradeMap(listings){
+  const map={};
+  listings.forEach(l=>{
+    const g=l.condition||'Raw';
+    if(!map[g])map[g]={listings:[]};
+    map[g].listings.push(l);
+  });
+  Object.keys(map).forEach(g=>{
+    map[g].grossAvg=avgGrossOf(map[g].listings);
+    map[g].count=map[g].listings.length;
+  });
+  return map;
+}
+
+function filterListings(listings,grade){
+  if(grade==='All')return listings;
+  if(grade==='Raw')return listings.filter(l=>!l.condition||l.condition==='Raw');
+  return listings.filter(l=>l.condition===grade);
+}
+
+// ── Render listings ────────────────────────────────────
+function renderStats(filtered){
+  const prices=filtered.map(l=>priceNum(l.price)).filter(Boolean);
+  if(!prices.length)return'';
+  const avg=prices.reduce((a,b)=>a+b,0)/prices.length;
+  const low=Math.min(...prices),high=Math.max(...prices);
+  return`<div class="stats-row">
+    <div class="stat-box"><div class="stat-label">Avg (${prices.length})</div><div class="stat-val">${fmtG(avg)}</div><div class="stat-sub">Net ${fmtN(avg)}</div></div>
+    <div class="stat-box"><div class="stat-label">Low</div><div class="stat-val">${fmtG(low)}</div><div class="stat-sub">Net ${fmtN(low)}</div></div>
+    <div class="stat-box"><div class="stat-label">High</div><div class="stat-val">${fmtG(high)}</div><div class="stat-sub">Net ${fmtN(high)}</div></div>
+  </div>`;
+}
+
+function renderListings(filtered){
+  if(!filtered.length)return`<div class="listings-wrap"><p class="no-comps">No listings for this grade filter.</p></div>`;
+  return`<div class="listings-wrap">${filtered.slice(0,15).map(l=>{
+    const g=priceNum(l.price);
+    return`<div class="listing-item">
+      <div class="listing-ph">🃏</div>
+      <div class="listing-info">
+        <div class="listing-name">${l.title}</div>
+        <div class="listing-sub">
+          ${l.condition?`<span>${l.condition}</span>`:''}
+          <span class="active-pill">ACTIVE</span>
+        </div>
+        ${l.url?`<a class="listing-link" href="${l.url}" target="_blank">View on eBay ↗</a>`:''}
+      </div>
+      <div class="listing-prices">
+        <div class="listing-gross">${fmtG(g)}</div>
+        <div class="listing-net">Net ${fmtN(g)}</div>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// ── What-if calculator ─────────────────────────────────
+function updateWhatIf(){
+  const grade=document.getElementById('whatif-grade')?.value;
+  const el=document.getElementById('whatif-result');
+  if(!grade){el.className='calc-result neutral';el.innerHTML='Pick a grade to see the math.';return;}
+  const gradeMap=buildGradeMap(allListings);
+  const rawGross=gradeMap['Raw']?.grossAvg||avgGrossOf(allListings);
+  const rawNet=netOf(rawGross);
+  const target=gradeMap[grade];
+  if(!target?.grossAvg){el.className='calc-result neutral';el.innerHTML=`No listings found for <b>${grade}</b>. Try the All filter or check eBay directly.`;return;}
+  const gradeNet=netOf(target.grossAvg);
+  const netGain=gradeNet-(rawNet||0)-GRADING_COST;
+  const roi=rawNet?((netGain/rawNet)*100):0;
+  const good=netGain>0;
+  el.className='calc-result '+(good?'positive':'negative');
+  el.innerHTML=`<b>${grade}</b>: ${fmtG(target.grossAvg)} gross → <b>${fmtG(gradeNet)} net</b><br>
+    Raw avg: ${fmtG(rawGross)} gross → ${fmtG(rawNet)} net<br>
+    After $${GRADING_COST} grading: <b>${good?'+':''}${fmtG(netGain)}</b> (${roi>0?'+':''}${roi.toFixed(0)}% ROI)<br>
+    <b>${good?'✓ Worth grading to '+grade:'✗ Sell raw — grading doesn\'t pencil out'}</b>`;
+}
+
+// ── Override decision ──────────────────────────────────
+function overrideDecision(decision,btn){
+  document.querySelectorAll('.override-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if(collection.length>0){
+    collection[0].decision=decision;
+    collection[0].reason='Decision set manually by user';
+    saveCollection();renderCollection();
+  }
+}
+
+// ── Manual ID correction ───────────────────────────────
+async function rerunWithEdits(){
+  if(!cardInfo)return;
+  cardInfo.player=document.getElementById('edit-player')?.value.trim()||cardInfo.player;
+  cardInfo.year=document.getElementById('edit-year')?.value.trim()||cardInfo.year;
+  cardInfo.brand=document.getElementById('edit-brand')?.value.trim()||cardInfo.brand;
+  cardInfo.set=document.getElementById('edit-set')?.value.trim()||cardInfo.set;
+  cardInfo.cardNumber=document.getElementById('edit-cardnum')?.value.trim()||cardInfo.cardNumber;
+  cardInfo.ebayQuery=[cardInfo.year,cardInfo.brand,cardInfo.set,cardInfo.player,cardInfo.cardNumber].filter(Boolean).join(' ');
+  setStatus('Re-fetching with corrected ID…',true);
+  document.getElementById('result').style.display='none';
+  allListings=await fetchAllComps(cardInfo.ebayQuery);
+  setStatus('',false);
+  addToCollection(cardInfo,allListings);
+  buildResult('✓ ID corrected — comps refreshed');
+}
+
+// ── Build result ───────────────────────────────────────
+function buildResult(msg){
+  if(!cardInfo)return;
+  const ci=cardInfo;
+  const title=[ci.year,ci.brand,ci.set,ci.player,ci.cardNumber].filter(Boolean).join(' ');
+  const filtered=filterListings(allListings,activeFilter);
+  const soldUrl='https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(ci.ebayQuery||title)+'&LH_Complete=1&LH_Sold=1&_sop=13';
+  const activeUrl='https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(ci.ebayQuery||title)+'&_sop=15';
+  const latestDecision=collection[0]?.decision||'keep';
+
+  document.getElementById('result').innerHTML=`
+    <div class="card-header">
+      <div class="card-player">${ci.player||'Unknown'}</div>
+      <div class="card-meta">${title}</div>
+      <div class="tags">
+        <span class="tag ${ci.gradingInfo?'graded':'raw'}">${ci.gradingInfo||'Raw'}</span>
+        ${ci.variation?`<span class="tag">${ci.variation}</span>`:''}
+        ${ci.sport?`<span class="tag">${ci.sport}</span>`:''}
+      </div>
+      <div class="edit-section">
+        <div class="edit-label">Correct ID if wrong</div>
+        <div class="edit-row">
+          <input class="edit-input" id="edit-player" placeholder="Player" value="${ci.player||''}"/>
+          <input class="edit-input narrow" id="edit-year" placeholder="Year" value="${ci.year||''}"/>
+        </div>
+        <div class="edit-row">
+          <input class="edit-input" id="edit-brand" placeholder="Brand" value="${ci.brand||''}"/>
+          <input class="edit-input" id="edit-set" placeholder="Set" value="${ci.set||''}"/>
+          <input class="edit-input narrow" id="edit-cardnum" placeholder="#" value="${ci.cardNumber||''}"/>
+        </div>
+        <button class="edit-btn" onclick="rerunWithEdits()">↺ Re-pull comps</button>
+      </div>
+    </div>
+
+    <p class="section-label">Filter by grade</p>
+    <div class="grade-filters">${GRADE_FILTERS.map(g=>`<button class="gf-btn${activeFilter===g?' active':''}" data-grade="${g}">${g}</button>`).join('')}</div>
+    <div id="stats-area">${renderStats(filtered)}</div>
+    <div id="listings-area">${renderListings(filtered)}</div>
+
+    <p class="section-label">What if I grade it?</p>
+    <div class="calc-box">
+      <div class="calc-box-title">Select your realistic grade estimate:</div>
+      <div class="calc-row">
+        <span class="calc-label">I think it grades:</span>
+        <select class="calc-select" id="whatif-grade" onchange="updateWhatIf()">
+          <option value="">— pick a grade —</option>
+          <optgroup label="PSA">${['PSA 1','PSA 2','PSA 3','PSA 4','PSA 5','PSA 6','PSA 7','PSA 8','PSA 8.5','PSA 9','PSA 9.5','PSA 10'].map(g=>`<option value="${g}">${g}</option>`).join('')}</optgroup>
+          <optgroup label="BGS">${['BGS 1','BGS 2','BGS 3','BGS 4','BGS 5','BGS 6','BGS 7','BGS 8','BGS 8.5','BGS 9','BGS 9.5','BGS 10'].map(g=>`<option value="${g}">${g}</option>`).join('')}</optgroup>
+          <optgroup label="SGC">${['SGC 1','SGC 2','SGC 3','SGC 4','SGC 5','SGC 6','SGC 7','SGC 8','SGC 9','SGC 9.5','SGC 10'].map(g=>`<option value="${g}">${g}</option>`).join('')}</optgroup>
+        </select>
+      </div>
+      <div class="calc-result neutral" id="whatif-result">Pick a grade to see the math.</div>
+    </div>
+
+    <p class="section-label">Your decision</p>
+    <div class="override-row">
+      <button class="override-btn sell${latestDecision==='sell'?' active':''}" onclick="overrideDecision('sell',this)">🔴 Sell</button>
+      <button class="override-btn keep${latestDecision==='keep'?' active':''}" onclick="overrideDecision('keep',this)">🟢 Keep</button>
+      <button class="override-btn grade${latestDecision==='grade'?' active':''}" onclick="overrideDecision('grade',this)">🔵 Grade</button>
+    </div>
+
+    <div style="font-size:11px;color:var(--green);margin-bottom:8px">${msg||'✓ Saved to collection'}</div>
+    <button class="ebay-sold-btn" onclick="window.open('${soldUrl}','_blank')">💰 View actual sold prices on eBay</button>
+    <button class="ebay-active-btn" onclick="window.open('${activeUrl}','_blank')">🔍 Browse active listings</button>
+    <div class="ebay-note">⚠️ Listings above are active (asking prices). Sold button shows actual hammer prices.</div>
+  `;
+  document.getElementById('result').style.display='block';
+
+  document.querySelectorAll('.gf-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      activeFilter=btn.dataset.grade;
+      const f=filterListings(allListings,activeFilter);
+      document.getElementById('stats-area').innerHTML=renderStats(f);
+      document.getElementById('listings-area').innerHTML=renderListings(f);
+      document.querySelectorAll('.gf-btn').forEach(b=>b.classList.toggle('active',b.dataset.grade===activeFilter));
+    });
+  });
+}
+
+// ── Collection ─────────────────────────────────────────
+function saveCollection(){localStorage.setItem('card_collection_v5',JSON.stringify(collection));}
+
+function addToCollection(ci,listings){
+  const grossAvg=avgGrossOf(listings);
+  const entry={
+    id:Date.now(),
+    player:ci.player||'Unknown',year:ci.year||'',brand:ci.brand||'',
+    set:ci.set||'',cardNumber:ci.cardNumber||'',
+    variation:ci.variation||'',gradingInfo:ci.gradingInfo||'',sport:ci.sport||'',
+    grossAvg,netAvg:netOf(grossAvg),
+    decision:'keep',reason:'',
+    scannedAt:new Date().toLocaleDateString('en-US')
+  };
+  collection.unshift(entry);saveCollection();updateCollBadge();
+}
+
+function deleteCard(id){
+  if(!confirm('Remove this card?'))return;
+  collection=collection.filter(c=>c.id!==id);
+  saveCollection();renderCollection();updateCollBadge();
+}
+
+function updateCollBadge(){
+  document.getElementById('coll-badge').textContent=collection.length?` (${collection.length})`:'';
+}
+updateCollBadge();
+
+function renderCollection(){
+  const search=(document.getElementById('coll-search')?.value||'').toLowerCase();
+  const sortVal=document.getElementById('coll-sort')?.value||'date';
+  let cards=[...collection];
+  if(search)cards=cards.filter(c=>[c.player,c.year,c.brand,c.set,c.variation,c.gradingInfo].join(' ').toLowerCase().includes(search));
+  cards.sort((a,b)=>{
+    if(sortVal==='date')return b.id-a.id;
+    if(sortVal==='value-desc')return(b.grossAvg||0)-(a.grossAvg||0);
+    if(sortVal==='value-asc')return(a.grossAvg||0)-(b.grossAvg||0);
+    if(sortVal==='player')return(a.player||'').localeCompare(b.player||'');
+    if(sortVal==='decision')return(a.decision||'').localeCompare(b.decision||'');
+    return 0;
+  });
+
+  const totalNet=collection.reduce((s,c)=>s+(c.netAvg||0),0);
+  const sells=collection.filter(c=>c.decision==='sell').length;
+  const keeps=collection.filter(c=>c.decision==='keep').length;
+  const grades=collection.filter(c=>c.decision==='grade').length;
+  document.getElementById('coll-summary').innerHTML=`
+    <div class="sum-box"><div class="sum-label">Cards</div><div class="sum-val">${collection.length}</div></div>
+    <div class="sum-box"><div class="sum-label">Est. net value</div><div class="sum-val">${fmtG(totalNet||null)}</div></div>
+    <div class="sum-box"><div class="sum-label">Sell/Keep/Grade</div><div class="sum-val">${sells}/${keeps}/${grades}</div></div>
+  `;
+
+  const list=document.getElementById('coll-list');
+  if(!cards.length){list.innerHTML='<div class="coll-empty">'+(collection.length?'No cards match search.':'Scan cards to build your collection.')+'</div>';return;}
+  const icons={sell:'🔴 Sell',keep:'🟢 Keep',grade:'🔵 Grade'};
+  list.innerHTML=cards.map(c=>{
+    const meta=[c.year,c.brand,c.set,c.cardNumber,c.variation,c.gradingInfo||'Raw'].filter(Boolean).join(' · ');
+    return`<div class="coll-card">
+      <div class="coll-card-top">
+        <div><div class="coll-card-player">${c.player}</div><div class="coll-card-meta">${meta}</div></div>
+        <div class="coll-card-right">
+          ${c.grossAvg?`<div class="coll-card-price">${fmtG(c.grossAvg)}</div><div class="coll-card-net">Net ${fmtG(c.netAvg)}</div>`:''}
+          <button class="del-btn" onclick="deleteCard(${c.id})">×</button>
+        </div>
+      </div>
+      <div class="coll-card-bottom">
+        <div class="coll-card-reason">${c.scannedAt}</div>
+        <span class="badge ${c.decision}">${icons[c.decision]||c.decision}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+renderCollection();
+
+// ── CSV Export ─────────────────────────────────────────
+function exportCSV(){
+  const headers=['Player','Year','Brand','Set','Card #','Variation','Grade/Condition','Sport','Gross Avg','Net Avg (after 13%)','Decision','Scanned'];
+  const rows=collection.map(c=>[
+    c.player,c.year,c.brand,c.set,c.cardNumber,c.variation,c.gradingInfo||'Raw',c.sport,
+    c.grossAvg?c.grossAvg.toFixed(2):'',c.netAvg?c.netAvg.toFixed(2):'',
+    c.decision,c.scannedAt
+  ].join(','));
+  const csv=[headers.join(','),...rows].join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=`card-collection-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// ── Main scan flow ─────────────────────────────────────
+async function run(base64){
+  document.getElementById('result').style.display='none';
+  clearError();allListings=[];cardInfo=null;activeFilter='All';
+
+  setStatus('Identifying card…',true);
+  try{
+    const data=await claudeCall([{role:'user',content:[
+      {type:'image',source:{type:'base64',media_type:'image/jpeg',data:base64}},
+      {type:'text',text:`You are a sports card expert. Identify this card precisely.
+Return ONLY a JSON object:
+- player: full name
+- year: year or range e.g. "1986-87"
+- brand: Topps/Fleer/Panini/Upper Deck/etc
+- set: set name
+- cardNumber: with # prefix or null
+- sport: Basketball/Baseball/Football/Golf/Hockey
+- variation: RC/Rookie Card/Refractor/Prizm/Holo/Gold/etc — null if base
+- gradingInfo: "PSA 9" / "BGS 8.5" if in a graded slab, else null
+- ebayQuery: 4-7 word eBay search — player, year, brand/set, card# if known. No grade/condition words.
+If not a sports card: {"error":"Not a sports card"}
+Raw JSON only, no markdown.`}
+    ]}]);
+    if(!data)return;
+    const txt=data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
+    cardInfo=JSON.parse(txt.replace(/```json|```/g,'').trim());
+  }catch(e){setStatus('',false);showError(`ID failed: ${e.message}`);return;}
+  if(cardInfo.error){setStatus('',false);showError(cardInfo.error);return;}
+
+  setStatus('Fetching eBay listings…',true);
+  allListings=await fetchAllComps(cardInfo.ebayQuery||[cardInfo.year,cardInfo.brand,cardInfo.player].filter(Boolean).join(' '));
+
+  setStatus('',false);
+  addToCollection(cardInfo,allListings);
+  buildResult();
+}
+</script>
+</body>
+</html>
